@@ -39,7 +39,6 @@ exifSplitDF <- data.frame(imageName = exifSplit$V6,
 # Merge images with alerts based on datetime
 alerts$image_datetime <- ymd_hms(alerts$image_datetime, tz = "UTC")
 
-
 alerts[which(! alerts$image_datetime %in% exifSplitDF$image_datetime),] # seems to be some duplicates, remove
 
 alertsNoDup <- alerts[which(!duplicated(alerts$image_datetime)),]
@@ -140,7 +139,7 @@ mergeAllReceived[which(mergeAllReceivedTimes$diffTime > 9473),]
 min(mergeAllReceivedTimes$diffTime) # -1.55 minutes is odd, check
 mergeAllReceivedTimes[mergeAllReceivedTimes$diffTime < 0,] # these took less than a minute to arrive in SEGC2 because very open sky, change to 0
 
-length(which(mergeAllReceivedTimes$diffTime < 16)) # 296 messages received in less than 5 minutes 
+length(which(mergeAllReceivedTimes$diffTime < 16)) # 296 messages received in less than 15 minutes 
 medianTime <- aggregate(diffTime ~ site, data = mergeAllReceivedTimes, FUN = median)
 minTime <- aggregate(diffTime ~ site, data = mergeAllReceivedTimes, FUN = min)
 maxTime <- aggregate(diffTime ~ site, data = mergeAllReceivedTimes, FUN = max)
@@ -205,16 +204,16 @@ mergeAllReceived <- mergeAllReceived[with(mergeAllReceived, order(site, image_da
 head(mergeAllReceived)
 
 eventList <- vector("list", length = length(unique(mergeAllReceived$site)))
-twindow <- 30*60 # (30 min window in s)
+twindow <- 30*60 # (30 min window = 1800 s)
 
 for(i in 1:length(unique(mergeAllReceived$site))){
   
-  newDat <- subset(mergeAllReceived, site == unique(mergeAllReceived$site)[i])
-  newDat$image_datetime_offset <- c(newDat$image_datetime_UTC[1], newDat$image_datetime_UTC[-nrow(newDat)])
-  newDat$event_timeDiff <-  newDat$image_datetime_UTC - newDat$image_datetime_offset
-  newDat$seq <- ifelse(newDat$event_timeDiff < twindow, 0, 1)
-  seqPoints <- which(newDat$seq == 1)
-  seqPoints <- c(1,seqPoints,length(newDat$seq))
+  newDat = subset(mergeAllReceived, site == unique(mergeAllReceived$site)[i])
+  newDat$image_datetime_offset = c(newDat$image_datetime_UTC[1], newDat$image_datetime_UTC[-nrow(newDat)])
+  newDat$event_timeDiff = newDat$image_datetime_UTC - newDat$image_datetime_offset
+  newDat$seq = ifelse(newDat$event_timeDiff < twindow, 0, 1)
+  seqPoints = which(newDat$seq == 1)
+  seqPoints = c(1,seqPoints,length(newDat$seq))
   
   newDat$eventNumber <- NA
   
@@ -231,10 +230,11 @@ for(i in 1:length(unique(mergeAllReceived$site))){
 eventDF <- do.call("rbind", eventList)
 head(eventDF)
 
-eventDF[,c("site", "image_datetime", "eventNumber")]
 
 # Create unique events
 eventDF$uniqueEvent <- paste0(eventDF$site, "_", eventDF$eventNumber)
+eventDF[,c("site", "image_datetime_UTC", "eventNumber", "uniqueEvent")]
+
 
 voteCountTruth <- as.data.frame.matrix(table(eventDF$uniqueEvent, eventDF$common_name))
 voteCountTruth$topVoteTruth <- max.col(voteCountTruth[,c("Elephant_African", "Human", "Other")],)
@@ -250,3 +250,69 @@ write.csv(confMatEvent$overall, "../results/ClassModelStatsEvent.csv")
 write.csv(confMatEvent$table, "../results/confusionMatrixEvent.csv")
 
 # For each event, take the prediction with the maximum softmax
+head(eventDF)
+
+elephants <- subset(eventDF, common_name == "Elephant_African")
+elephants
+
+# Plot softmax for each elephant event
+plot(c(0,100) ~ c(1,20), col = "white", ylab = "Softmax %", xlab = "Image number in event")
+
+thresh <- vector("list", length = length(unique(elephants$eventNumber)))
+for(i in 1:length(unique(elephants$uniqueEvent))){
+  
+  newDat <- subset(elephants, uniqueEvent == unique(elephants$uniqueEvent)[i])
+  newDat$eventOrder <- 1:nrow(newDat)
+  points(inference_accuracy*100 ~ eventOrder, newDat, main = uniqueEvent[1], pch = 16)
+  
+}
+
+# Exclude images from events with increasing softmax threshold and see if it improves the voting on the events
+# Iteratively subset the images gong from 0.5 > 0.9 in 0.1 intervals and run the confusion matrix + stats
+thresholds <- seq(0, 0.9,0.1)
+thresholdList <- vector("list", length = length(thresholds))
+eventNumbers <- vector("list", length = length(thresholds))
+
+for(i in 1:length(thresholds)){
+  
+  newDat <- subset(eventDF, inference_accuracy >= thresholds[i])
+  
+  voteCountTruth <- as.data.frame.matrix(table(newDat$uniqueEvent, newDat$common_name))
+  voteCountTruth$topVoteTruth <- max.col(voteCountTruth[,c("Elephant_African", "Human", "Other")],)
+  
+  voteCount <- as.data.frame.matrix(table(newDat$uniqueEvent, newDat$inference_class))
+  voteCount$topVote <- max.col(voteCount[,c("Elephant_African", "Human", "Other")],)
+  eventNumbers[[i]] <- length(which(voteCount$topVote == 1)) # number of elephant events
+
+  
+  thresholdList[[i]] <- confusionMatrix(data = factor(voteCount$topVote), reference = factor(voteCountTruth$topVoteTruth))
+  
+}
+
+
+thresholdList
+eventNumbers
+eventNumbers <- do.call("rbind", eventNumbers)
+
+threshRes <- data.frame(n = rep(NA, length = length(thresholds)), 
+                        overallAccuracy = rep(NA, length = length(thresholds)),
+                        elephantBalancedAcc = rep(NA, length = length(thresholds)),
+                        humanBalancedAcc = rep(NA, length = length(thresholds)),
+                        otherBalancedAcc = rep(NA, length = length(thresholds)))
+
+for(i in 1:length(thresholds)){
+  
+  threshRes$n[i] <- eventNumbers[i]
+  threshRes[i,c(2:5)] <- c(thresholdList[[i]]$overall[1], thresholdList[[i]]$byClass[,11])
+  
+}
+
+threshRes$threshold <- thresholds
+
+par(mfrow = c(1,3))
+plot(overallAccuracy ~ threshold, data = threshRes, ylim = c(0,1))
+plot(eventNumbers ~ threshold, data = threshRes, ylim = c(0,50))
+plot(elephantBalancedAcc ~ threshold, data = threshRes, ylim = c(0,1))
+plot(eventNumbers ~ elephantBalancedAcc, data = threshRes, ylim = c(0,50))
+
+write.csv(threshRes, "../Results/threshres.csv")
