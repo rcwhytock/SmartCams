@@ -4,6 +4,9 @@ library(exifr)
 library(lubridate)
 library(ggplot2)
 library(caret)
+library(yardstick)
+library(plyr)
+library(cowplot)
 
 # Load the meta data
 alerts <- read.csv("../metaData/rawAlerts.csv")
@@ -81,7 +84,10 @@ mergeAll[which(mergeAll$site %in% c("AirportEast")),"site"] <- "Airport East"
 mergeAllReceived <- mergeAll[which(!is.na(mergeAll$inference_class)),] 
 
 # Remove images with no timestamp
-mergeAllReceived <- mergeAllReceived[which(year(mergeAllReceived$image_datetime) > year(dmy("01/01/2019"))),]
+mergeAllReceived <- mergeAllReceived[which(year(mergeAllReceived$image_datetime) > year(dmy("01/01/2019"))),] # 17 with wrong date from early testing
+
+### N images reported in paper is 814 - 17
+814 - 17
 
 # Store alerts by day
 alertsByDay <- as.data.frame.matrix((table(mergeAllReceived$site, day(mergeAllReceived$image_datetime))))
@@ -92,7 +98,40 @@ imagesByDay <- as.data.frame.matrix((table(mergeAll$site, day(mergeAll$image_dat
 imagesByDay <- imagesByDay[,-1] # Remove first column which is images with no timestamp during testing at SEGC
 write.csv(imagesByDay, "../Results/imagesByDay.csv")
 
-# Plot mean bridge power per day
+#### Plot mean bridge power per day
+
+# First merge the Holland data
+names(mergeAllReceived[,c(3:11,17)])
+
+
+netherland$site <- ifelse(netherland$imei == unique(netherland$imei[1]), "Netherlands 1", "Netherlands 2")
+netherland$created_date <- ymd_hms(netherland$created_date)
+unique(month(netherland$created_date))
+
+meanPowerNetherlands <- aggregate(bridge_voltage ~ site + round_date(netherland$created_date, unit = "day"), data = netherland, FUN = mean)
+names(meanPowerNetherlands)[2] <- "day"
+
+# How many alerts per day in Netherlands
+netherlandAlerts <- as.data.frame.matrix(table(round_date(netherland$created_date, unit = "day"), netherland$site))
+mean(c(netherlandAlerts$`Netherlands 1`, netherlandAlerts$`Netherlands 2`))
+min(c(netherlandAlerts$`Netherlands 1`, netherlandAlerts$`Netherlands 2`))
+max(c(netherlandAlerts$`Netherlands 1`, netherlandAlerts$`Netherlands 2`))
+
+
+pdf(file = "../Results/Figures/bridgeVoltageNetherland.pdf", width = 8, height = 4)
+ggplot(data = meanPowerNetherlands, aes(day, bridge_voltage)) +
+  geom_line(color = "steelblue", size = 0.5) +
+  geom_point(color="steelblue", size = 1) + 
+  labs(title = "",
+       subtitle = "",
+       y = "Bridge voltage", x = expression(paste("Date (2020/2021)"))) + 
+  ylim(c(2000,4000)) +
+  facet_wrap(~ site) +
+  theme_classic() +
+  theme(panel.spacing = unit(1, "lines"))
+dev.off()
+
+# Field test
 meanPower <- aggregate(bridge_voltage ~ site + day(mergeAllReceived$image_datetime), data = mergeAllReceived, FUN = min)
 names(meanPower)[2] <- "day"
 
@@ -108,7 +147,7 @@ ggplot(data = meanPower, aes(day, bridge_voltage)) +
   geom_point(color="steelblue", size = 1) + 
   labs(title = "",
        subtitle = "",
-       y = "Bridge voltage", x = expression(paste("Deployment day (1 =", " 1"^"st", " June 2021)"))) + 
+       y = "Bridge voltage", x = expression(paste("Day (1 =", " 1"^"st", " June 2021)"))) + 
   ylim(c(2000,4000)) +
   facet_wrap(~ site) +
   theme_classic() +
@@ -139,7 +178,10 @@ mergeAllReceived[which(mergeAllReceivedTimes$diffTime > 9473),]
 min(mergeAllReceivedTimes$diffTime) # -1.55 minutes is odd, check
 mergeAllReceivedTimes[mergeAllReceivedTimes$diffTime < 0,] # these took less than a minute to arrive in SEGC2 because very open sky, change to 0
 
-length(which(mergeAllReceivedTimes$diffTime < 16)) # 296 messages received in less than 15 minutes 
+length(which(mergeAllReceivedTimes$diffTime < 16)) # 296 (52%) messages received in less than 15 minutes
+length(which(mergeAllReceivedTimes$diffTime < 60*12)) # 331(52%) messages received in less than 15 minutes 
+
+
 medianTime <- aggregate(diffTime ~ site, data = mergeAllReceivedTimes, FUN = median)
 minTime <- aggregate(diffTime ~ site, data = mergeAllReceivedTimes, FUN = min)
 maxTime <- aggregate(diffTime ~ site, data = mergeAllReceivedTimes, FUN = max)
@@ -183,9 +225,15 @@ mergeAllReceived$common_name <- factor(mergeAllReceived$common_name)
 confmat <- confusionMatrix(reference = mergeAllReceived$common_name, data = mergeAllReceived$inference_class)
 
 str(confmat)
-write.csv(confmat$byClass, "../results/ClassModelStats.csv")
-write.csv(confmat$overall, "../results/ClassModelStats.csv")
+write.csv(confmat$byClass, "../results/ClassModelStatsByClass.csv")
+write.csv(confmat$overall, "../results/ClassModelStatsOverall.csv")
 write.csv(confmat$table, "../results/confusionMatrix.csv")
+
+pdf("../Results/Figures/confMatByImage.pdf", width = 4, height = 4)
+autoplot(conf_mat(data = mergeAllReceived, estimate = inference_class, truth = common_name), type = "heatmap") +
+  scale_fill_gradient(low= "#D6EAF8", high = "#2E86C1") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+dev.off()
 
 # Compare autoML with Mbazza
 mergeAllReceived[!mergeAllReceived$label %in% c("Elephant_African", "Human"),"label"] <- "Other"
@@ -195,9 +243,15 @@ mergeAllReceived$label
 confmatMbazza <- confusionMatrix(reference = mergeAllReceived$common_name, data = mergeAllReceived$label)
 confmatMbazza
 
-write.csv(confmatMbazza$byClass, "../results/ClassModelStatsMbazza.csv")
-write.csv(confmatMbazza$overall, "../results/ClassModelStatsMbazza.csv")
+write.csv(confmatMbazza$byClass, "../results/ClassModelStatsMbazzaByClass.csv")
+write.csv(confmatMbazza$overall, "../results/ClassModelStatsMbazzaOverall.csv")
 write.csv(confmatMbazza$table, "../results/confusionMatrixMbazza.csv")
+
+pdf("../Results/Figures/confMatByImageMbaza.pdf", width = 4, height = 4)
+autoplot(conf_mat(data = mergeAllReceived, estimate = label, truth = common_name), type = "heatmap") +
+  scale_fill_gradient(low= "#D6EAF8", high = "#2E86C1") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+dev.off()
 
 # Offset time column to calculate events
 mergeAllReceived <- mergeAllReceived[with(mergeAllReceived, order(site, image_datetime_UTC)),]
@@ -235,19 +289,35 @@ head(eventDF)
 eventDF$uniqueEvent <- paste0(eventDF$site, "_", eventDF$eventNumber)
 eventDF[,c("site", "image_datetime_UTC", "eventNumber", "uniqueEvent")]
 
-
 voteCountTruth <- as.data.frame.matrix(table(eventDF$uniqueEvent, eventDF$common_name))
+voteCountTruth
+
 voteCountTruth$topVoteTruth <- max.col(voteCountTruth[,c("Elephant_African", "Human", "Other")],)
+voteCountTruth$topVoteTruth <- as.character(mapvalues(voteCountTruth$topVoteTruth, from = c(1,2,3), c("Elephant_African", "Human", "Other")))
 
 voteCount <- as.data.frame.matrix(table(eventDF$uniqueEvent, eventDF$inference_class))
 voteCount$topVote <- max.col(voteCount[,c("Elephant_African", "Human", "Other")],)
+voteCount$topVote <- as.character(mapvalues(voteCount$topVote, from = c(1,2,3), c("Elephant_African", "Human", "Other")))
 
 confMatEvent <- confusionMatrix(data = factor(voteCount$topVote), reference = factor(voteCountTruth$topVoteTruth))
 # Ele = 1, Human = 2, Other = 3
 
-write.csv(confMatEvent$byClass, "../results/ClassModelStatsEvent.csv")
-write.csv(confMatEvent$overall, "../results/ClassModelStatsEvent.csv")
+write.csv(confMatEvent$byClass, "../results/ClassModelStatsEventByClass.csv")
+write.csv(confMatEvent$overall, "../results/ClassModelStatsEventOverall.csv")
 write.csv(confMatEvent$table, "../results/confusionMatrixEvent.csv")
+
+# Need to label properly for plot
+voteCount$topVoteTruth <- voteCountTruth$topVoteTruth
+
+# Store as factor
+voteCount$topVoteTruth <- factor(voteCount$topVoteTruth)
+voteCount$topVote <- factor(voteCount$topVote)
+
+pdf("../Results/Figures/confMatVote.pdf", width = 4, height = 4)
+autoplot(conf_mat(data = voteCount, estimate = topVote, truth = topVoteTruth), type = "heatmap") +
+  scale_fill_gradient(low= "#D6EAF8", high = "#2E86C1") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+dev.off()
 
 # For each event, take the prediction with the maximum softmax
 head(eventDF)
@@ -272,6 +342,8 @@ for(i in 1:length(unique(elephants$uniqueEvent))){
 thresholds <- seq(0, 0.9,0.1)
 thresholdList <- vector("list", length = length(thresholds))
 eventNumbers <- vector("list", length = length(thresholds))
+eventNumbersTruth <- vector("list", length = length(thresholds))
+
 
 for(i in 1:length(thresholds)){
   
@@ -282,8 +354,8 @@ for(i in 1:length(thresholds)){
   
   voteCount <- as.data.frame.matrix(table(newDat$uniqueEvent, newDat$inference_class))
   voteCount$topVote <- max.col(voteCount[,c("Elephant_African", "Human", "Other")],)
-  eventNumbers[[i]] <- length(which(voteCount$topVote == 1)) # number of elephant events
-
+  eventNumbers[[i]] <- length(which(voteCount$topVote == 1)) # number of elephant events seen
+  eventNumbersTruth[[i]] <- length(which(voteCountTruth$topVoteTruth == 1)) # number of elephant events
   
   thresholdList[[i]] <- confusionMatrix(data = factor(voteCount$topVote), reference = factor(voteCountTruth$topVoteTruth))
   
@@ -309,10 +381,40 @@ for(i in 1:length(thresholds)){
 
 threshRes$threshold <- thresholds
 
-par(mfrow = c(1,3))
-plot(overallAccuracy ~ threshold, data = threshRes, ylim = c(0,1))
-plot(eventNumbers ~ threshold, data = threshRes, ylim = c(0,50))
-plot(elephantBalancedAcc ~ threshold, data = threshRes, ylim = c(0,1))
-plot(eventNumbers ~ elephantBalancedAcc, data = threshRes, ylim = c(0,50))
+
+overallPlot <- ggplot(data = threshRes, aes(y = overallAccuracy, x = threshold)) +
+  geom_line(color = "steelblue", size = 0.5) +
+  geom_point(color="steelblue", size = 1) + 
+  labs(title = "",
+       subtitle = "",
+       y = "Overall accuracy", x = "Softmax threshold") + 
+  ylim(c(0,1)) +
+  xlim(c(0,1)) +
+  theme_classic()
+
+elePlot <- ggplot(data = threshRes, aes(y = elephantBalancedAcc, x = threshold)) +
+  geom_line(color = "steelblue", size = 0.5) +
+  geom_point(color="steelblue", size = 1) + 
+  labs(title = "",
+       subtitle = "",
+       y = "Elephant balanced accuracy", x = "Softmax threshold") + 
+  ylim(c(0,1)) +
+  xlim(c(0,1)) +
+  theme_classic()
+
+sampleSizePlot <- ggplot(data = threshRes, aes(y = n, x = threshold)) +
+  geom_line(color = "steelblue", size = 0.5) +
+  geom_point(color="steelblue", size = 1) + 
+  labs(title = "",
+       subtitle = "",
+       y = "N elephant events detected", x = "Softmax threshold") + 
+  ylim(c(0,50)) +
+  xlim(c(0,1)) +
+  geom_hline(yintercept = 29, linetype = "dashed", colour = "skyblue") +
+  theme_classic()
+
+pdf("../Results/Figures/eventThreshold.pdf", width = 8, height = 3)
+plot_grid(overallPlot, elePlot, sampleSizePlot, nrow = 1)
+dev.off()
 
 write.csv(threshRes, "../Results/threshres.csv")
