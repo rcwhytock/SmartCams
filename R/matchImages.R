@@ -7,6 +7,7 @@ library(caret)
 library(yardstick)
 library(plyr)
 library(cowplot)
+library(tidyr)
 
 # Load the meta data
 alerts <- read.csv("../metaData/rawAlerts.csv")
@@ -119,17 +120,43 @@ max(c(netherlandAlerts$`Netherlands 1`, netherlandAlerts$`Netherlands 2`))
 
 
 pdf(file = "../Results/Figures/bridgeVoltageNetherland.pdf", width = 8, height = 4)
-ggplot(data = meanPowerNetherlands, aes(day, bridge_voltage)) +
+bridgeVoltPlot <- ggplot(data = meanPowerNetherlands, aes(day, bridge_voltage)) +
   geom_line(color = "steelblue", size = 0.5) +
   geom_point(color="steelblue", size = 1) + 
   labs(title = "",
        subtitle = "",
-       y = "Bridge voltage", x = expression(paste("Date (2020/2021)"))) + 
+       y = "Bridge voltage", x = "") + 
   ylim(c(2000,4000)) +
   facet_wrap(~ site) +
   theme_classic() +
   theme(panel.spacing = unit(1, "lines"))
+bridgeVoltPlot
 dev.off()
+
+# Plot camera power
+meanCamPowerNetherlands <- aggregate(cam_voltage ~ site + round_date(netherland$created_date, unit = "day"), data = netherland, FUN = mean)
+names(meanCamPowerNetherlands)[2] <- "day"
+
+
+pdf(file = "../Results/Figures/camVoltageNetherland.pdf", width = 8, height = 4)
+camVoltPlot <- ggplot(data = meanCamPowerNetherlands, aes(day, cam_voltage)) +
+  geom_line(color = "steelblue", size = 0.5) +
+  geom_point(color="steelblue", size = 1) + 
+  labs(title = "",
+       subtitle = "",
+       y = "Camera voltage", x = expression(paste("Date (2020/2021)"))) + 
+  ylim(c(9000,11500)) +
+  facet_wrap(~ site) +
+  theme_classic() +
+  theme(panel.spacing = unit(1, "lines"))
+camVoltPlot
+dev.off()
+
+# Plot smart bridge and camera voltage
+pdf("../Results/Figures/voltagePlots.pdf", width = 8, height = 8)
+plot_grid(bridgeVoltPlot, camVoltPlot, nrow = 2)
+dev.off()
+
 
 # Field test
 meanPower <- aggregate(bridge_voltage ~ site + day(mergeAllReceived$image_datetime), data = mergeAllReceived, FUN = min)
@@ -139,7 +166,8 @@ names(meanPower)[2] <- "day"
 meanPower <- subset(meanPower, site != "Cayet")
 
 
-meanPower
+meanPower <- data.frame(complete(meanPower, day, site))
+meanPower$bridge_voltage <- ifelse(meanPower$bridge_voltage == 0 , NA, meanPower$bridge_voltage)
 
 pdf(file = "../Results/Figures/bridgeVoltage.pdf", width = 4, height = 4)
 ggplot(data = meanPower, aes(day, bridge_voltage)) +
@@ -180,7 +208,6 @@ mergeAllReceivedTimes[mergeAllReceivedTimes$diffTime < 0,] # these took less tha
 
 length(which(mergeAllReceivedTimes$diffTime < 16)) # 296 (52%) messages received in less than 15 minutes
 length(which(mergeAllReceivedTimes$diffTime < 60*12)) # 331(52%) messages received in less than 15 minutes 
-
 
 medianTime <- aggregate(diffTime ~ site, data = mergeAllReceivedTimes, FUN = median)
 minTime <- aggregate(diffTime ~ site, data = mergeAllReceivedTimes, FUN = min)
