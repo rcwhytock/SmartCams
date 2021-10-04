@@ -1,4 +1,3 @@
-#### Note this would be a lot shorter if the dateTime format of the alerts for the image time included the seconds
 # Load libs
 library(exifr)
 library(lubridate)
@@ -76,10 +75,10 @@ mergeAll[which(is.na(mergeAll$inference_class)),c("location", "image_datetime")]
 
 # Fix the site names 
 unique(mergeAll$site)
-mergeAll[which(mergeAll$site %in% c("AirportWest1", "AirportWest2")),"site"] <- "Airport West"
+mergeAll[which(mergeAll$site %in% c("AirportWest1", "AirportWest2")),"site"] <- "Forest West"
 mergeAll[which(mergeAll$site %in% c("SEGC1", "SEGC2")),"site"] <- "SEGC"
 mergeAll[which(mergeAll$site %in% c("KazamabikaOriginal")),"site"] <- "Kazamabika"
-mergeAll[which(mergeAll$site %in% c("AirportEast")),"site"] <- "Airport East"
+mergeAll[which(mergeAll$site %in% c("AirportEast")),"site"] <- "Forest East"
 
 # Table of alerts per day for each camera, for supplementary mat.
 mergeAllReceived <- mergeAll[which(!is.na(mergeAll$inference_class)),] 
@@ -189,10 +188,10 @@ mergeAllReceived$transmit_time <- ymd_hms(mergeAllReceived$transmit_time)
 # Subtract an hour from the image taken time as Gabon is UTC +1
 mergeAllReceived$image_datetime_UTC <- mergeAllReceived$image_datetime - hours(1)
 
-# Only keep airport East, Airport West, SEGC2 and Kazamabika
+# Only keep Forest East, Forest West, SEGC and Kazamabika
 unique(mergeAllReceived$site)
 
-mergeAllReceivedTimes <- subset(mergeAllReceived, site %in% c("Airport East", "Airport West", "Kazamabika", "SEGC"))
+mergeAllReceivedTimes <- subset(mergeAllReceived, site %in% c("Forest East", "Forest West", "Kazamabika", "SEGC"))
 
 
 # Time diff
@@ -319,11 +318,11 @@ eventDF[,c("site", "image_datetime_UTC", "eventNumber", "uniqueEvent")]
 voteCountTruth <- as.data.frame.matrix(table(eventDF$uniqueEvent, eventDF$common_name))
 voteCountTruth
 
-voteCountTruth$topVoteTruth <- max.col(voteCountTruth[,c("Elephant_African", "Human", "Other")],)
+voteCountTruth$topVoteTruth <- max.col(voteCountTruth[,c("Elephant_African", "Human", "Other")],ties.method = c("first"))
 voteCountTruth$topVoteTruth <- as.character(mapvalues(voteCountTruth$topVoteTruth, from = c(1,2,3), c("Elephant_African", "Human", "Other")))
 
 voteCount <- as.data.frame.matrix(table(eventDF$uniqueEvent, eventDF$inference_class))
-voteCount$topVote <- max.col(voteCount[,c("Elephant_African", "Human", "Other")],)
+voteCount$topVote <- max.col(voteCount[,c("Elephant_African", "Human", "Other")],ties.method = c("first"))
 voteCount$topVote <- as.character(mapvalues(voteCount$topVote, from = c(1,2,3), c("Elephant_African", "Human", "Other")))
 
 confMatEvent <- confusionMatrix(data = factor(voteCount$topVote), reference = factor(voteCountTruth$topVoteTruth))
@@ -375,17 +374,18 @@ eventNumbersTruth <- vector("list", length = length(thresholds))
 for(i in 1:length(thresholds)){
   
   newDat <- subset(eventDF, inference_accuracy >= thresholds[i])
-  
+
   voteCountTruth <- as.data.frame.matrix(table(newDat$uniqueEvent, newDat$common_name))
-  voteCountTruth$topVoteTruth <- max.col(voteCountTruth[,c("Elephant_African", "Human", "Other")],)
-  
+  voteCountTruth$topVoteTruth <- max.col(voteCountTruth[,c("Elephant_African", "Human", "Other")], ties.method = c("first")) # if a tie then choose elephant
+
   voteCount <- as.data.frame.matrix(table(newDat$uniqueEvent, newDat$inference_class))
-  voteCount$topVote <- max.col(voteCount[,c("Elephant_African", "Human", "Other")],)
+  voteCount$topVote <- max.col(voteCount[,c("Elephant_African", "Human", "Other")],ties.method = c("first"))
+  
   eventNumbers[[i]] <- length(which(voteCount$topVote == 1)) # number of elephant events seen
-  eventNumbersTruth[[i]] <- length(which(voteCountTruth$topVoteTruth == 1)) # number of elephant events
+  eventNumbersTruth[[i]] <- length(which(voteCountTruth$topVoteTruth == 1)) # true number of elephant events
   
   thresholdList[[i]] <- confusionMatrix(data = factor(voteCount$topVote), reference = factor(voteCountTruth$topVoteTruth))
-  
+
 }
 
 
@@ -439,6 +439,9 @@ sampleSizePlot <- ggplot(data = threshRes, aes(y = n, x = threshold)) +
   xlim(c(0,1)) +
   geom_hline(yintercept = 29, linetype = "dashed", colour = "skyblue") +
   theme_classic()
+
+
+plot_grid(overallPlot, elePlot, sampleSizePlot, nrow = 1)
 
 pdf("../Results/Figures/eventThreshold.pdf", width = 8, height = 3)
 plot_grid(overallPlot, elePlot, sampleSizePlot, nrow = 1)
