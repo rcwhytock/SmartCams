@@ -448,3 +448,19 @@ plot_grid(overallPlot, elePlot, sampleSizePlot, nrow = 1)
 dev.off()
 
 write.csv(threshRes, "../Results/threshres.csv")
+
+# Load inference times to make graph
+infTimes <- read.csv("../MLinferenceTimes/MLinferenceTimes.csv")
+names(infTimes)
+names(infTimes) <- c("CNN_architecture", "Inference_time_s")
+infTimes <- infTimes[order(infTimes$Inference_time_s),]
+
+pdf(file = "../Results/Figures/CNNInferenceTime.pdf", width = 6, height = 4)
+ggplot(infTimes, aes(x = Inference_time_s, y = reorder(CNN_architecture, -Inference_time_s))) + 
+  geom_bar(stat = "identity") +
+  labs(title = "",
+       subtitle = "",
+       y = "", x = expression(paste("Inference time (seconds)"))) +
+  theme_classic() +
+  theme(plot.margin = margin(10, 25, 5, 5))
+dev.off()
