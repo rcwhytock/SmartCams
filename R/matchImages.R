@@ -18,7 +18,7 @@ head(netherland)
 unique(netherland$imei)
 
 # Load image names and paths
-imageList <- list.files("../SmartCamData", full.names = T, recursive = TRUE)
+imageList <- list.files("../SmartCamData/", full.names = T, recursive = TRUE)
 
 # Create data frame of image paths, site names and image name
 imageListSplit <- strsplit(imageList, split = "/")
@@ -68,6 +68,8 @@ finalDat$path <- gsub("\\../", "", finalDat$path)
 # Merge the alerts and the Mbaza classifications, keeping on the alerts
 names(finalDat)[17] <- "location"
 mergeAll <- merge(finalDat, mbaza, by = "location")
+
+write.csv(mergeAll, "../Results/smartCamAlerts.csv", row.names = F)
 
 # Identify which images weren't received as alerts (mostly Cayet)
 mergeAll[which(is.na(mergeAll$inference_class)),c("location", "image_datetime")] 
