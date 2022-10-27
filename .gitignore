@@ -37,3 +37,9 @@ rsconnect/
 
 # images
 *.JPG
+
+# manuscript docs
+Manuscript/
+
+# results output
+Results/
